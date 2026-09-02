@@ -444,7 +444,10 @@ function wrapForBox(text: string, approxCharsPerLine: number): string[] {
   return lines;
 }
 
-const HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
+/** 四角同時調寬高，四邊只調單一方向。resize 邏輯用 corner 字串裡有沒有 n/s/e/w 判斷，
+ * 單邊代號本來就跟四角代號共用同一套判斷式，不用另外改拖曳運算。 */
+const CORNER_HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
+const EDGE_HANDLES = ['n', 's', 'e', 'w'] as const;
 
 function RegionView({
   region,
@@ -588,21 +591,41 @@ function RegionView({
         </svg>
       ) : null}
 
-      {editable
-        ? HANDLES.map((c) => (
+      {/* 控制點只在這一格被選中時才畫出來，不是每一格編輯時都全部亮著，
+          不然畫面上一堆框同時佈滿把手，反而看不清楚現在在動哪一個。 */}
+      {editable && active ? (
+        <>
+          {CORNER_HANDLES.map((c) => (
             <span
               key={c}
               onPointerDown={(e) => onStartResize(e, c)}
               className={cx(
-                'absolute size-3 rounded-full border-2 border-white bg-slate-800 shadow',
+                'absolute z-10 size-3 rounded-full border-2 border-white bg-slate-800 shadow',
                 c === 'nw' && '-top-1.5 -left-1.5 cursor-nwse-resize',
                 c === 'ne' && '-top-1.5 -right-1.5 cursor-nesw-resize',
                 c === 'sw' && '-bottom-1.5 -left-1.5 cursor-nesw-resize',
                 c === 'se' && '-right-1.5 -bottom-1.5 cursor-nwse-resize',
               )}
             />
-          ))
-        : null}
+          ))}
+          {/* 單邊把手：只拉一條邊，寬或高其中一個維度單獨調整，不會牽動另一邊 */}
+          {EDGE_HANDLES.map((c) => (
+            <span
+              key={c}
+              onPointerDown={(e) => onStartResize(e, c)}
+              className={cx(
+                'absolute z-10 rounded-full border-2 border-white bg-slate-800 shadow',
+                (c === 'n' || c === 's') && 'h-3 w-6 -translate-x-1/2 cursor-ns-resize',
+                (c === 'e' || c === 'w') && 'h-6 w-3 -translate-y-1/2 cursor-ew-resize',
+                c === 'n' && '-top-1.5 left-1/2',
+                c === 's' && '-bottom-1.5 left-1/2',
+                c === 'e' && 'top-1/2 -right-1.5',
+                c === 'w' && 'top-1/2 -left-1.5',
+              )}
+            />
+          ))}
+        </>
+      ) : null}
     </div>
   );
 }
