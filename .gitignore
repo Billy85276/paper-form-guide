@@ -27,6 +27,10 @@ dev-dist
 .vercel
 *.local
 
-# 這是使用者自己那張帶有真實姓名/電話/學號的原始照片，只留在本機參考，
-# 絕對不能進版本控制。示範用的假資料圖片是 public/sample-form-demo.jpg，那張才進 git。
+# 使用者自己那張帶有真實姓名/電話/學號的原始照片，只留在本機參考。
+# 它已經從 public/ 移到 _private/：public/ 底下的東西 Vite 建置時會原封不動
+# 複製進 dist/，放在那裡等於每次本機建置都會把個資打包進產物，
+# 一旦哪天用手動上傳的方式部署就會外流。放 _private/ 就不是建置輸入了。
+# 示範用的假資料圖片是 public/sample-form-demo.jpg，那張才進 git。
+_private/
 public/sample-form.jpg
