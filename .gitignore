@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+dist
+dev-dist
+.vercel
+*.local
+
+# 這是使用者自己那張帶有真實姓名/電話/學號的原始照片，只留在本機參考，
+# 絕對不能進版本控制。示範用的假資料圖片是 public/sample-form-demo.jpg，那張才進 git。
+public/sample-form.jpg

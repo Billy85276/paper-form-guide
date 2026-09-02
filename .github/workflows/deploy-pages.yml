@@ -1,0 +1,47 @@
+# 把整個網站部署到 GitHub Pages，是目前唯一、也是主要的正式站主機。
+#
+# 推到 main 就會自動建置並上線，網址是
+# https://<github-帳號>.github.io/<repo-名稱>/。
+# 若日後想要多一層韌性，可以再把同一份程式碼部署到 Cloudflare Pages 之類的
+# 免費服務，紙上印兩顆 QR，任何一家掛掉時掃另一顆即可。詳見 README.md。
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

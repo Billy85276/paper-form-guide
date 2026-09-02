@@ -1,0 +1,203 @@
+@import 'tailwindcss';
+
+/**
+ * 設計語彙
+ *
+ * 這套東西的使用場景是「站在櫃檯前、單手拿手機、後面還有人在排隊」，
+ * 所以介面刻意做成高對比、大點擊區、少層級。
+ * 顏色只有三種角色：藍色是你要填、灰色是別人填、紅色是會出錯的地方。
+ */
+
+@theme {
+  --color-ink: #0f172a;
+  --color-paper: #f8fafc;
+  --color-brand: #2563eb;
+  --color-brand-soft: #dbeafe;
+  --color-staff: #64748b;
+  --color-danger: #dc2626;
+  --color-ok: #059669;
+  --font-hand: 'Iansui', 'LXGW WenKai TC', 'Klee One', 'Noto Sans TC', cursive;
+  --font-sans:
+    'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, -apple-system, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+  /* 中文標點與斷行 */
+  line-break: strict;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* iOS 上輸入框字級小於 16px 會觸發自動放大，很煩 */
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  font-size: max(16px, 1em);
+}
+
+/* ------------------------------------------------------------------ */
+/* 標註動畫                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 呼吸螢光。這是整個視覺引導的核心：
+ * 學生一眼就知道「紙上這個位置有事要做」。
+ * 動畫用 opacity 與 box-shadow，不動 transform，
+ * 因為標註是絕對定位在照片上的，一旦縮放就會對不準。
+ */
+@keyframes fgs-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--marker) 55%, transparent);
+    opacity: 0.92;
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--marker) 0%, transparent),
+      0 0 14px 2px color-mix(in srgb, var(--marker) 70%, transparent);
+    opacity: 1;
+  }
+}
+
+@keyframes fgs-pop {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.fgs-pulse {
+  animation: fgs-breathe 2.4s ease-in-out infinite;
+}
+
+.fgs-pop {
+  animation: fgs-pop 0.18s ease-out;
+}
+
+/* 目前這一步的標註要壓過其他所有標註 */
+.fgs-active {
+  --marker: currentColor;
+  z-index: 30;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, currentColor 35%, transparent),
+    0 0 22px 4px color-mix(in srgb, currentColor 55%, transparent);
+}
+
+/* 逐步精靈時，非當前的標註淡出但不消失，維持空間感 */
+.fgs-dimmed {
+  opacity: 0.28;
+  filter: saturate(0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fgs-pulse,
+  .fgs-pop {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 手寫模擬                                                            */
+/* ------------------------------------------------------------------ */
+
+.fgs-hand {
+  font-family: var(--font-hand);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 0 1px color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* 捲動與觸控                                                          */
+/* ------------------------------------------------------------------ */
+
+.fgs-scroll {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fgs-no-select {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* 列印                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 列印是這套系統的第一級產出，不是附屬功能。
+ * 網站掛掉、手機沒電、老師不想掃 QR 的時候，紙本永遠可用。
+ * 中文在這裡是作業系統排版的向量文字，不需要內嵌任何字型檔。
+ */
+@page {
+  size: A4 portrait;
+  margin: 12mm 12mm 14mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+    margin: 0;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .fgs-pulse {
+    animation: none !important;
+  }
+
+  .print-page {
+    break-after: page;
+    break-inside: avoid;
+  }
+
+  .print-page:last-child {
+    break-after: auto;
+  }
+
+  .print-step {
+    break-inside: avoid;
+    orphans: 3;
+    widows: 3;
+  }
+
+  a[href]::after {
+    content: none;
+  }
+}
+
+.print-only {
+  display: none;
+}
