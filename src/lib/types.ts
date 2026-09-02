@@ -131,6 +131,12 @@ export interface Region {
   h: number;
   /** arrow 形狀專用：箭頭尾巴起點（百分比） */
   tail?: { x: number; y: number };
+  /**
+   * 編號圓圈的位置，畫布絕對座標（百分比），不是相對於這個標註的框。
+   * 留空時預設貼在框的左上角。設定後可以拖到框外當成指示牌，
+   * 這時畫面會自動補一條細線連回框上，讓人看得出它屬於哪一格。
+   */
+  badgePos?: { x: number; y: number };
   style: RegionStyle;
   role: RegionRole;
   audience: Audience;

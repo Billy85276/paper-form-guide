@@ -13,6 +13,11 @@ import { cx } from './ui';
  *
  * 座標一律是百分比，容器用 aspect-ratio 鎖住比例，
  * 所以不論在 iPhone SE 還是 27 吋螢幕還是 A4 紙上，標註都落在同一個位置。
+ *
+ * 編號圓圈（badge）刻意獨立成自己的一層，不是巢狀畫在每個標註框裡面。
+ * 理由是編號要能拖出框外當指示牌用，如果巢在框的座標系裡，
+ * 一旦拖到框外，換算起來會很痛苦；獨立成一層之後，
+ * 編號跟標註框用的是同一套畫布絕對座標，拖曳邏輯完全一致。
  */
 
 export interface FocusRect {
@@ -27,7 +32,7 @@ export interface FormCanvasProps {
   copy: Copy;
   lang: LangCode;
   activeRegionId?: string | null;
-  /** 逐步精靈模式：非當前標註淡出 */
+  /** 逐步精靈模式：非當前標註淡出（仍看得到，只是變暗） */
   dimOthers?: boolean;
   onSelect?: (id: string | null) => void;
   /** 編輯模式：可拖曳、可縮放、可框選新增 */
@@ -45,6 +50,14 @@ export interface FormCanvasProps {
   /** 放大聚焦到某個區域 */
   focus?: FocusRect | null;
   showBadges?: boolean;
+  /** 暫時隱藏所有標註框與編號，只看底圖原本的樣子 */
+  hideOverlays?: boolean;
+  /**
+   * 專注模式：只顯示目前選中的標註，其餘全部隱藏，
+   * 除非跟目前選中的標註在畫面上有重疊，那種會用半透明顯示，
+   * 提醒「這裡跟別的東西疊在一起」。
+   */
+  focusMode?: boolean;
   className?: string;
 }
 
@@ -53,8 +66,25 @@ const INK_CLASS = { blue: 'text-[#1a3c8a]', black: 'text-slate-900', red: 'text-
 type DragState =
   | { kind: 'move'; id: string; startX: number; startY: number; orig: Region }
   | { kind: 'resize'; id: string; corner: string; startX: number; startY: number; orig: Region }
+  | { kind: 'badge'; id: string }
   | { kind: 'draw'; startX: number; startY: number; cur: FocusRect }
   | null;
+
+/** 兩個矩形是否有重疊（AABB 相交測試） */
+function rectsOverlap(a: FocusRect, b: FocusRect): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/** 矩形外一點，找矩形邊界上離它最近的一點，用來畫指示線 */
+function nearestOnRect(px: number, py: number, r: FocusRect): { x: number; y: number } {
+  return {
+    x: clamp(px, r.x, r.x + r.w),
+    y: clamp(py, r.y, r.y + r.h),
+  };
+}
+
+/** 編號離框多遠就視為「被拉出去了」，要補一條指示線（畫布百分比） */
+const BADGE_LEASH = 2.5;
 
 export function FormCanvas(props: FormCanvasProps) {
   const {
@@ -74,6 +104,8 @@ export function FormCanvas(props: FormCanvasProps) {
     showStaff = true,
     focus,
     showBadges = true,
+    hideOverlays = false,
+    focusMode = false,
     className,
   } = props;
 
@@ -91,13 +123,18 @@ export function FormCanvas(props: FormCanvasProps) {
     [copy.regions, unlockedDepts, showStaff],
   );
 
+  const activeRegion = useMemo(
+    () => visible.find((r) => r.id === activeRegionId) ?? null,
+    [visible, activeRegionId],
+  );
+
   /** 把滑鼠或手指的位置換算成百分比座標 */
   const toPct = useCallback((clientX: number, clientY: number) => {
     const box = wrapRef.current?.getBoundingClientRect();
     if (!box) return { x: 0, y: 0 };
     return {
-      x: ((clientX - box.left) / box.width) * 100,
-      y: ((clientY - box.top) / box.height) * 100,
+      x: clamp(((clientX - box.left) / box.width) * 100, 0, 100),
+      y: clamp(((clientY - box.top) / box.height) * 100, 0, 100),
     };
   }, []);
 
@@ -132,6 +169,12 @@ export function FormCanvas(props: FormCanvasProps) {
           h: Math.abs(p.y - drag.startY),
         },
       });
+      return;
+    }
+
+    if (drag.kind === 'badge') {
+      const region = copy.regions.find((r) => r.id === drag.id);
+      if (region) commit({ ...region, badgePos: { x: p.x, y: p.y } });
       return;
     }
 
@@ -170,6 +213,13 @@ export function FormCanvas(props: FormCanvasProps) {
     setDrag(null);
   };
 
+  const resetBadge = (region: Region) => {
+    if (!editable) return;
+    const { badgePos, ...rest } = region;
+    void badgePos;
+    commit(rest as Region);
+  };
+
   // 聚焦某一格時，把整張圖放大並平移，讓那一格落在畫面中央
   const focusStyle = useMemo(() => {
     if (!focus) return undefined;
@@ -183,6 +233,8 @@ export function FormCanvas(props: FormCanvasProps) {
       transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
     } as React.CSSProperties;
   }, [focus]);
+
+  const showOverlayLayer = !hideOverlays;
 
   return (
     <div className={cx('relative w-full overflow-hidden rounded-xl bg-white', className)}>
@@ -212,35 +264,131 @@ export function FormCanvas(props: FormCanvasProps) {
             </div>
           )}
 
-          {visible.map((region) => (
-            <RegionView
-              key={region.id}
-              region={region}
-              lang={lang}
-              active={region.id === activeRegionId}
-              dimmed={Boolean(dimOthers && activeRegionId && region.id !== activeRegionId)}
-              editable={editable}
-              showBadge={showBadges}
-              simulate={simulate}
-              value={region.fieldKey ? values?.[region.fieldKey] : undefined}
-              onSelect={() => onSelect?.(region.id)}
-              onStartMove={(e) => {
-                if (!editable) return;
-                e.stopPropagation();
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                const p = toPct(e.clientX, e.clientY);
-                onSelect?.(region.id);
-                setDrag({ kind: 'move', id: region.id, startX: p.x, startY: p.y, orig: region });
-              }}
-              onStartResize={(e, corner) => {
-                if (!editable) return;
-                e.stopPropagation();
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                const p = toPct(e.clientX, e.clientY);
-                setDrag({ kind: 'resize', id: region.id, corner, startX: p.x, startY: p.y, orig: region });
-              }}
-            />
-          ))}
+          {showOverlayLayer
+            ? visible.map((region) => {
+                const isActive = region.id === activeRegionId;
+                const overlapsActive =
+                  focusMode && activeRegion && !isActive ? rectsOverlap(region, activeRegion) : false;
+                // 專注模式下，跟目前選中標註無關也沒重疊的框，直接不畫
+                if (focusMode && activeRegion && !isActive && !overlapsActive) return null;
+
+                return (
+                  <RegionView
+                    key={region.id}
+                    region={region}
+                    lang={lang}
+                    active={isActive}
+                    dimmed={Boolean(dimOthers && activeRegionId && !isActive)}
+                    overlapping={overlapsActive}
+                    editable={editable}
+                    simulate={simulate}
+                    value={region.fieldKey ? values?.[region.fieldKey] : undefined}
+                    onSelect={() => onSelect?.(region.id)}
+                    onStartMove={(e) => {
+                      if (!editable) return;
+                      e.stopPropagation();
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      const p = toPct(e.clientX, e.clientY);
+                      onSelect?.(region.id);
+                      setDrag({ kind: 'move', id: region.id, startX: p.x, startY: p.y, orig: region });
+                    }}
+                    onStartResize={(e, corner) => {
+                      if (!editable) return;
+                      e.stopPropagation();
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      const p = toPct(e.clientX, e.clientY);
+                      setDrag({ kind: 'resize', id: region.id, corner, startX: p.x, startY: p.y, orig: region });
+                    }}
+                  />
+                );
+              })
+            : null}
+
+          {/* 編號圓圈與指示線，獨立一層，跟標註框用同一套畫布絕對座標 */}
+          {showOverlayLayer && showBadges ? (
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="pointer-events-none absolute inset-0 size-full overflow-visible"
+            >
+              {visible.map((region) => {
+                if (region.style.hideBadge) return null;
+                const isActive = region.id === activeRegionId;
+                const overlapsActive =
+                  focusMode && activeRegion && !isActive ? rectsOverlap(region, activeRegion) : false;
+                if (focusMode && activeRegion && !isActive && !overlapsActive) return null;
+                if (!region.badgePos) return null; // 沒拉出去的畫在下面的 HTML 層即可
+                const color = region.style.color || ROLE_COLOR[region.role];
+                const anchor = nearestOnRect(region.badgePos.x, region.badgePos.y, region);
+                const dx = region.badgePos.x - anchor.x;
+                const dy = region.badgePos.y - anchor.y;
+                const far = Math.hypot(dx, dy) > BADGE_LEASH;
+                if (!far) return null;
+                return (
+                  <line
+                    key={region.id}
+                    x1={anchor.x}
+                    y1={anchor.y}
+                    x2={region.badgePos.x}
+                    y2={region.badgePos.y}
+                    stroke={color}
+                    strokeWidth={0.35}
+                    strokeDasharray="1.4 1.2"
+                    opacity={dimOthers && !isActive ? 0.35 : 0.85}
+                  />
+                );
+              })}
+            </svg>
+          ) : null}
+
+          {showOverlayLayer && showBadges
+            ? visible.map((region) => {
+                if (region.style.hideBadge) return null;
+                const isActive = region.id === activeRegionId;
+                const overlapsActive =
+                  focusMode && activeRegion && !isActive ? rectsOverlap(region, activeRegion) : false;
+                if (focusMode && activeRegion && !isActive && !overlapsActive) return null;
+
+                const color = region.style.color || ROLE_COLOR[region.role];
+                const pos = region.badgePos ?? { x: region.x, y: region.y };
+                const pulled = Boolean(region.badgePos);
+
+                return (
+                  <span
+                    key={region.id}
+                    onPointerDown={(e) => {
+                      if (!editable) return;
+                      e.stopPropagation();
+                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      onSelect?.(region.id);
+                      setDrag({ kind: 'badge', id: region.id });
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      resetBadge(region);
+                    }}
+                    title={editable ? '拖曳移動編號，雙擊還原到框角' : undefined}
+                    className={cx(
+                      'absolute grid size-5 place-items-center rounded-full text-[10px] font-bold text-white shadow sm:size-6 sm:text-xs',
+                      editable ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none',
+                      dimOthers && !isActive ? 'opacity-40' : '',
+                      overlapsActive ? 'opacity-40' : '',
+                      isActive ? 'z-10 ring-2 ring-white' : '',
+                    )}
+                    style={{
+                      left: `${pos.x}%`,
+                      top: `${pos.y}%`,
+                      backgroundColor: color,
+                      // 沒拖過就貼在框角，往外多推一點，
+                      // 跟框角自己的縮放把手（也在同一個角落）錯開，兩個才不會疊在一起。
+                      transform: pulled ? 'translate(-50%, -50%)' : 'translate(-85%, -85%)',
+                    }}
+                  >
+                    {region.step}
+                  </span>
+                );
+              })
+            : null}
 
           {/* 模擬填寫時一律蓋上浮水印。這張圖看起來太像真的填好的表單，
               沒有這行字它會被轉傳、被誤當成有效單據。 */}
@@ -280,6 +428,22 @@ function pctStyle(r: { x: number; y: number; w: number; h: number }): React.CSSP
   return { left: `${r.x}%`, top: `${r.y}%`, width: `${r.w}%`, height: `${r.h}%` };
 }
 
+/** 把長文字依可用寬度換算的字元數概略換行，模擬填寫用，不需要逐字量測那麼精準 */
+function wrapForBox(text: string, approxCharsPerLine: number): string[] {
+  if (!text) return [];
+  const lines: string[] = [];
+  let line = '';
+  for (const ch of text) {
+    line += ch;
+    if (line.length >= approxCharsPerLine) {
+      lines.push(line);
+      line = '';
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
 const HANDLES = ['nw', 'ne', 'sw', 'se'] as const;
 
 function RegionView({
@@ -287,8 +451,8 @@ function RegionView({
   lang,
   active,
   dimmed,
+  overlapping,
   editable,
-  showBadge,
   simulate,
   value,
   onSelect,
@@ -299,8 +463,9 @@ function RegionView({
   lang: LangCode;
   active: boolean;
   dimmed: boolean;
+  /** 專注模式下，跟目前選中標註重疊而被半透明化顯示 */
+  overlapping: boolean;
   editable?: boolean;
-  showBadge: boolean;
   simulate?: boolean;
   value?: string;
   onSelect: () => void;
@@ -336,9 +501,18 @@ function RegionView({
 
   if (region.shape === 'arrow') {
     return (
-      <ArrowRegion region={region} color={color} active={active} dimmed={dimmed} onSelect={onSelect} />
+      <ArrowRegion
+        region={region}
+        color={color}
+        active={active}
+        dimmed={dimmed || overlapping}
+        onSelect={onSelect}
+      />
     );
   }
+
+  // 手寫模擬值：框夠寬就用框寬概算每行字數換行，避免長字串整條溢出畫面
+  const wrapped = value ? wrapForBox(value, Math.max(4, Math.round(region.w / 2.6))) : [];
 
   return (
     <div
@@ -356,40 +530,39 @@ function RegionView({
       className={cx(
         'absolute box-border transition-opacity',
         shapeClass,
-        region.style.pulse && !dimmed ? 'fgs-pulse' : '',
+        region.style.pulse && !dimmed && !overlapping ? 'fgs-pulse' : '',
         active ? 'fgs-active' : '',
         dimmed ? 'fgs-dimmed' : '',
+        overlapping ? 'opacity-35 saturate-50' : '',
         editable ? 'cursor-move' : 'cursor-pointer',
       )}
       style={base}
     >
-      {showBadge && !region.style.hideBadge ? (
-        <span
-          className="pointer-events-none absolute -top-2.5 -left-2.5 grid size-5 place-items-center rounded-full text-[10px] font-bold text-white shadow sm:size-6 sm:text-xs"
-          style={{ backgroundColor: color }}
-        >
-          {region.step}
-        </span>
-      ) : null}
-
       {simulate && value ? (
-        <span
+        <div
           className={cx(
-            'fgs-hand absolute inset-0 flex items-center px-[2%]',
+            'fgs-hand absolute inset-0 flex flex-col justify-center gap-[0.15em] rounded-sm px-[2%] py-[1%]',
             INK_CLASS[region.handwriting?.ink ?? 'blue'],
             region.handwriting?.align === 'center'
-              ? 'justify-center'
+              ? 'items-center text-center'
               : region.handwriting?.align === 'right'
-                ? 'justify-end'
-                : 'justify-start',
+                ? 'items-end text-right'
+                : 'items-start text-left',
           )}
           style={{
             fontSize: `${(region.handwriting?.size ?? 2.2) * 0.9}cqw`,
-            transform: `rotate(${region.handwriting?.rotate ?? -1}deg)`,
+            // 淡淡一層白底墊在字後面，蓋在印刷格線上時字才看得清楚，
+            // 不會跟底下的表格線、選項文字糊在一起。
+            background:
+              'radial-gradient(ellipse at center, color-mix(in srgb, white 78%, transparent) 55%, transparent 100%)',
           }}
         >
-          {value}
-        </span>
+          {wrapped.map((line, i) => (
+            <span key={i} style={{ transform: `rotate(${region.handwriting?.rotate ?? -1}deg)` }}>
+              {line}
+            </span>
+          ))}
+        </div>
       ) : null}
 
       {simulate && region.role === 'check' && !region.fieldKey ? (
@@ -462,7 +635,7 @@ function ArrowRegion({
       className={cx(
         'absolute inset-0 size-full cursor-pointer',
         active ? 'drop-shadow' : '',
-        dimmed ? 'fgs-dimmed' : '',
+        dimmed ? 'fgs-dimmed opacity-35' : '',
       )}
       style={{ color }}
     >

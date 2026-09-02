@@ -67,6 +67,22 @@ function drawWrapped(
   return y + lines.length * lineHeight;
 }
 
+/** 手寫模擬值的概略換行，跟畫面上即時預覽用同一套字元數估算，不需要逐字量測 */
+function wrapHandLine(text: string, approxCharsPerLine: number): string[] {
+  if (!text) return [];
+  const lines: string[] = [];
+  let line = '';
+  for (const ch of text) {
+    line += ch;
+    if (line.length >= approxCharsPerLine) {
+      lines.push(line);
+      line = '';
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
 function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -180,11 +196,33 @@ function drawRegion(
   }
   ctx.restore();
 
-  // 編號圓圈
+  // 編號圓圈。有拖出去（badgePos）就畫在拖出去的地方，並補一條指示線，
+  // 跟編輯畫面裡看到的位置一致，匯出的圖才不會跟畫面對不起來。
   if (opts.showBadges !== false && !region.style.hideBadge && region.shape !== 'pin') {
     const rBadge = Math.max(10, W * 0.016);
-    const bx = x - rBadge * 0.2;
-    const by = y - rBadge * 0.2;
+    let bx = x - rBadge * 0.2;
+    let by = y - rBadge * 0.2;
+
+    if (region.badgePos) {
+      bx = (region.badgePos.x / 100) * W;
+      by = (region.badgePos.y / 100) * H;
+      const anchorX = Math.min(Math.max(bx, x), x + w);
+      const anchorY = Math.min(Math.max(by, y), y + h);
+      const pulled = Math.hypot(bx - anchorX, by - anchorY) > rBadge * 1.2;
+      if (pulled) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1, rBadge * 0.12);
+        ctx.setLineDash([rBadge * 0.5, rBadge * 0.4]);
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(anchorX, anchorY);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     ctx.save();
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -198,21 +236,46 @@ function drawRegion(
     ctx.restore();
   }
 
-  // 模擬填寫的手寫字
+  // 模擬填寫的手寫字。跟畫面上的即時預覽用同一套邏輯：
+  // 長字串換行、字後面墊一層淡淡的白底，才不會跟底下印刷的表格線、文字糊在一起。
   if (opts.simulate && region.fieldKey && opts.values?.[region.fieldKey]) {
     const value = opts.values[region.fieldKey];
     const spec = region.handwriting;
     const size = ((spec?.size ?? 2.2) / 100) * W;
+    const align = spec?.align ?? 'left';
     ctx.save();
     ctx.font = `500 ${size}px "Iansui", "LXGW WenKai TC", "Klee One", "Noto Sans TC", cursive`;
-    ctx.fillStyle = INK[spec?.ink ?? 'blue'];
+    const approxChars = Math.max(4, Math.round((region.w / 2.6) * 1));
+    const lines = wrapHandLine(value, approxChars);
+    const lineHeight = size * 1.18;
+    const blockH = lines.length * lineHeight;
+
+    const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - size * 0.25 : x + size * 0.25;
+    const ty = y + h / 2 - blockH / 2 + lineHeight / 2;
+
+    ctx.textAlign = align;
     ctx.textBaseline = 'middle';
-    const cx =
-      spec?.align === 'center' ? x + w / 2 : spec?.align === 'right' ? x + w - size * 0.2 : x + size * 0.25;
-    ctx.textAlign = spec?.align ?? 'left';
-    ctx.translate(cx, y + h / 2);
-    ctx.rotate(((spec?.rotate ?? -1) * Math.PI) / 180);
-    ctx.fillText(value, 0, 0);
+
+    // 淡白底墊在文字後面
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = '#ffffff';
+    const padX = size * 0.3;
+    const widest = Math.max(...lines.map((l) => ctx.measureText(l).width), 0);
+    const boxW = widest + padX * 2;
+    const boxX = align === 'center' ? tx - boxW / 2 : align === 'right' ? tx - boxW + padX : tx - padX;
+    roundRect(ctx, boxX, ty - lineHeight / 2 - size * 0.15, boxW, blockH + size * 0.3, size * 0.2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = INK[spec?.ink ?? 'blue'];
+    lines.forEach((line, i) => {
+      ctx.save();
+      ctx.translate(tx, ty + i * lineHeight);
+      ctx.rotate(((spec?.rotate ?? -1) * Math.PI) / 180);
+      ctx.fillText(line, 0, 0);
+      ctx.restore();
+    });
     ctx.restore();
   }
 

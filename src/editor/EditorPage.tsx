@@ -47,6 +47,39 @@ const TOOLS: { shape: RegionShape | null; label: string; title: string }[] = [
   { shape: 'arrow', label: '箭頭', title: '從空白處指向某個位置' },
 ];
 
+/** 工具列上一顆看起來像按鈕、實際是勾選框的小控制項 */
+function ToggleChip({
+  checked,
+  onChange,
+  children,
+  title,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  children: React.ReactNode;
+  title?: string;
+}) {
+  return (
+    <label
+      title={title}
+      className={cx(
+        'inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors select-none',
+        checked
+          ? 'border-slate-900 bg-slate-900 text-white'
+          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-3.5 accent-white"
+      />
+      {children}
+    </label>
+  );
+}
+
 interface FileHandleLike {
   createWritable: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }>;
   name: string;
@@ -63,7 +96,11 @@ export function EditorPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [backupName, setBackupName] = useState<string | null>(null);
-  const [preview, setPreview] = useState(false);
+  // 預設就看「填好的樣子」，讓編輯者一開始就知道成品長怎樣；
+  // 要動標註框再自己取消勾選切回空白引導。
+  const [preview, setPreview] = useState(true);
+  const [hideFrames, setHideFrames] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
 
   const backupHandle = useRef<FileHandleLike | null>(null);
   const saveTimer = useRef<number | null>(null);
@@ -249,7 +286,7 @@ export function EditorPage() {
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             {preview ? (
               <span className="text-sm text-slate-500">
-                目前是「看填好的樣子」預覽，先切回空白引導才能繼續編輯標註
+                目前是「看填好的樣子」預覽，取消勾選才能繼續編輯標註
               </span>
             ) : (
               <>
@@ -275,17 +312,9 @@ export function EditorPage() {
               </>
             )}
             <Button
-              variant={preview ? 'primary' : 'outline'}
-              size="sm"
-              className="ml-auto"
-              onClick={() => setPreview((v) => !v)}
-              title="用每個欄位的範例值，預覽填好之後大概長怎樣"
-            >
-              {preview ? '看空白引導' : '看填好的樣子'}
-            </Button>
-            <Button
               variant="ghost"
               size="sm"
+              className="ml-auto"
               onClick={() => {
                 update((g) => renumberSteps(g));
                 toast('已依目前順序重新編號');
@@ -293,6 +322,30 @@ export function EditorPage() {
             >
               重新編號
             </Button>
+          </div>
+
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <ToggleChip
+              checked={preview}
+              onChange={setPreview}
+              title="用每個欄位的範例值，預覽填好之後大概長怎樣"
+            >
+              看填好的樣子
+            </ToggleChip>
+            <ToggleChip
+              checked={hideFrames}
+              onChange={setHideFrames}
+              title="暫時隱藏所有標註框與編號，只看底圖原本的樣子"
+            >
+              隱藏框線（看原圖）
+            </ToggleChip>
+            <ToggleChip
+              checked={focusMode}
+              onChange={setFocusMode}
+              title="只顯示目前選中的標註，其餘隱藏；跟選中項目重疊的會用半透明顯示"
+            >
+              專注模式
+            </ToggleChip>
           </div>
 
           {guide.copies.length > 1 ? (
@@ -336,6 +389,8 @@ export function EditorPage() {
               }
               simulate={preview}
               values={previewValues}
+              hideOverlays={hideFrames}
+              focusMode={focusMode}
               className="border border-slate-200 shadow-sm"
             />
           ) : (
